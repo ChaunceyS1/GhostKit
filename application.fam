@@ -1,0 +1,11 @@
+App(
+    appid="ghostkit",
+    name="GhostKit",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="ghostkit_main",
+    requires=["gui", "storage"],
+    stack_size=4 * 1024,
+    fap_category="Tools",
+    fap_version=(1, 0),
+    fap_description="Physical pentest toolkit by Chauncey",
+)
