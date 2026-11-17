@@ -15,12 +15,68 @@
 // ============================================
 
 #define GHOST_ACCESS_PROTOCOL_NAME_LEN 48
+#define GHOST_ACCESS_SEVERITY_LEN 8
 
 typedef struct {
     bool scanning;
     bool has_result;
     char last_protocol[GHOST_ACCESS_PROTOCOL_NAME_LEN];
+    char last_severity[GHOST_ACCESS_SEVERITY_LEN];
 } GhostAccessModel;
+
+// ============================================
+// Per-protocol vulnerability assessment.
+//
+// Not every contactless protocol is equally weak: MIFARE Classic's Crypto1
+// cipher has been broken for over a decade (trivially clonable), while
+// DESFire uses AES and is not. Severity reflects that instead of a flat
+// "MEDIUM" for every card.
+// ============================================
+static int ghost_access_severity_rank(NfcProtocol protocol) {
+    switch(protocol) {
+    case NfcProtocolMfClassic:
+    case NfcProtocolMfUltralight:
+        return 3; // HIGH
+    case NfcProtocolIso15693_3:
+    case NfcProtocolMfPlus:
+    case NfcProtocolSlix:
+    case NfcProtocolSt25tb:
+        return 2; // MEDIUM
+    default:
+        return 1; // LOW
+    }
+}
+
+static const char* ghost_access_severity_label(int rank) {
+    switch(rank) {
+    case 3:
+        return "HIGH";
+    case 2:
+        return "MEDIUM";
+    default:
+        return "LOW";
+    }
+}
+
+static const char* ghost_access_protocol_note(NfcProtocol protocol) {
+    switch(protocol) {
+    case NfcProtocolMfClassic:
+        return "MIFARE Classic - Crypto1 cipher is broken, card is clonable";
+    case NfcProtocolMfUltralight:
+        return "MIFARE Ultralight - typically unauthenticated, clonable";
+    case NfcProtocolMfPlus:
+        return "MIFARE Plus - may fall back to weaker Classic-compatible mode";
+    case NfcProtocolMfDesfire:
+        return "MIFARE DESFire - AES-128 secured, not trivially clonable";
+    case NfcProtocolIso15693_3:
+        return "ISO15693 - common access/asset tag, often unauthenticated";
+    case NfcProtocolIso14443_3a:
+    case NfcProtocolIso14443_3b:
+        return "Bare ISO14443-3 UID only, no higher-layer auth confirmed";
+    default:
+        return "Protocol detected, no specific vulnerability assessment yet";
+    }
+}
 
 // ============================================
 // NFC SCANNER CALLBACK — runs on the NFC worker thread
@@ -71,9 +127,24 @@ void ghost_access_handle_detected(GhostKitApp* app) {
         furi_string_cat_str(names, "Unknown protocol");
     }
 
+    // Report on whichever detected protocol is the most severe, not just the first one
+    NfcProtocol primary = NfcProtocolInvalid;
+    int best_rank = 0;
+    for(size_t i = 0; i < app->detected_protocol_count; i++) {
+        int rank = ghost_access_severity_rank(app->detected_protocols[i]);
+        if(rank > best_rank) {
+            best_rank = rank;
+            primary = app->detected_protocols[i];
+        }
+    }
+    const char* severity = ghost_access_severity_label(best_rank);
+    const char* note = app->detected_protocol_count > 0 ? ghost_access_protocol_note(primary) :
+                                                            "No card responded";
+
     FuriString* title = furi_string_alloc();
-    furi_string_printf(title, "RFID/NFC Card Detected: %s", furi_string_get_cstr(names));
-    ghost_log_write(app, furi_string_get_cstr(title), "MEDIUM", "T1078");
+    furi_string_printf(
+        title, "RFID/NFC Card Detected: %s - %s", furi_string_get_cstr(names), note);
+    ghost_log_write(app, furi_string_get_cstr(title), severity, "T1078");
 
     notification_message(app->notifications, &sequence_single_vibro);
 
@@ -83,6 +154,8 @@ void ghost_access_handle_detected(GhostKitApp* app) {
         model->has_result = true;
         strncpy(model->last_protocol, furi_string_get_cstr(names), GHOST_ACCESS_PROTOCOL_NAME_LEN - 1);
         model->last_protocol[GHOST_ACCESS_PROTOCOL_NAME_LEN - 1] = '\0';
+        strncpy(model->last_severity, severity, GHOST_ACCESS_SEVERITY_LEN - 1);
+        model->last_severity[GHOST_ACCESS_SEVERITY_LEN - 1] = '\0';
         view_commit_model(app->access_view, true);
     }
 
@@ -105,9 +178,12 @@ static void ghost_access_draw(Canvas* canvas, void* model_ptr) {
     canvas_set_font(canvas, FontSecondary);
 
     if(model->has_result) {
+        char severity_line[56];
+        snprintf(severity_line, sizeof(severity_line), "Severity: %s", model->last_severity);
+
         canvas_draw_str(canvas, 2, 25, "Card detected:");
         canvas_draw_str(canvas, 2, 37, model->last_protocol);
-        canvas_draw_str(canvas, 2, 49, "Finding logged to GhostLog");
+        canvas_draw_str(canvas, 2, 49, severity_line);
         canvas_draw_str(canvas, 2, 61, "[Back] Return to menu");
     } else if(model->scanning) {
         canvas_draw_str(canvas, 2, 25, "Scanning...");
@@ -183,6 +259,7 @@ View* ghost_access_alloc(GhostKitApp* app) {
     model->scanning = false;
     model->has_result = false;
     model->last_protocol[0] = '\0';
+    model->last_severity[0] = '\0';
     view_commit_model(view, false);
 
     app->access_view = view;

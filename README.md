@@ -155,6 +155,7 @@ git clone https://github.com/ChaunceyS1/GhostKit \
 - [x] GhostLog — findings logger with SD card export
 - [x] GhostAccess — screen + navigation working
 - [x] GhostAccess — NFC/RFID protocol detection via NfcScanner, auto-logged to GhostLog
+- [x] GhostAccess — per-protocol severity rating (Crypto1/MIFARE Classic = HIGH, DESFire/AES = LOW, etc.)
 - [ ] GhostAccess — key recovery, clone, emulate
 - [ ] GhostSignal — SubGHz passive scanner with protocol detection
 - [ ] GhostDrop — BadUSB payload menu with payload library
