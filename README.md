@@ -31,7 +31,7 @@ Every module maps to MITRE ATT&CK techniques and generates CVSS-scored findings 
 
 | Module | Description | Status | MITRE |
 |---|---|---|---|
-| GhostAccess | RFID/NFC access control bypass | 🔨 In Development | T1078, T1212 |
+| GhostAccess | RFID/NFC protocol recon (detect + log) | 🔨 In Development | T1078, T1212 |
 | GhostSignal | SubGHz RF signal capture & analysis | 🔨 In Development | T1040, T1056 |
 | GhostDrop | BadUSB payload launcher | 🔨 In Development | T1566, T1059 |
 | GhostBLE | Bluetooth device recon & mapping | 🔨 In Development | T1040, T1046 |
@@ -154,7 +154,8 @@ git clone https://github.com/ChaunceyS1/GhostKit \
 - [x] App skeleton + main menu
 - [x] GhostLog — findings logger with SD card export
 - [x] GhostAccess — screen + navigation working
-- [ ] GhostAccess — NFC card read, key recovery, clone, emulate
+- [x] GhostAccess — NFC/RFID protocol detection via NfcScanner, auto-logged to GhostLog
+- [ ] GhostAccess — key recovery, clone, emulate
 - [ ] GhostSignal — SubGHz passive scanner with protocol detection
 - [ ] GhostDrop — BadUSB payload menu with payload library
 - [ ] GhostBLE — BLE scanner + spam + remote control

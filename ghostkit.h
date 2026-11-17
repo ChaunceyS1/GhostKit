@@ -8,6 +8,10 @@
 #include <storage/storage.h>
 #include <notification/notification_messages.h>
 
+#include <nfc/nfc.h>
+#include <nfc/nfc_scanner.h>
+#include <nfc/nfc_device.h>
+
 // ============================================
 // Views
 // ============================================
@@ -34,15 +38,39 @@ typedef enum {
 } GhostKitMenuItem;
 
 // ============================================
+// Custom view-dispatcher events
+// ============================================
+typedef enum {
+    GhostKitCustomEventNfcDetected,
+} GhostKitCustomEvent;
+
+// Max number of simultaneously detected NFC protocols we keep around
+#define GHOSTKIT_NFC_MAX_PROTOCOLS 8
+
+// ============================================
 // App state
 // ============================================
 typedef struct {
     ViewDispatcher*  view_dispatcher;
+    Gui*             gui;
     Submenu*         main_menu;
     DialogEx*        about_dialog;
     Storage*         storage;
     NotificationApp* notifications;
     uint32_t         finding_count;
+
+    // Raw custom views we own directly (freed with view_free)
+    View* access_view;
+    View* signal_view;
+    View* drop_view;
+    View* ble_view;
+    View* log_view;
+
+    // GhostAccess NFC scan state
+    Nfc*        nfc;
+    NfcScanner* nfc_scanner;
+    NfcProtocol detected_protocols[GHOSTKIT_NFC_MAX_PROTOCOLS];
+    size_t      detected_protocol_count;
 } GhostKitApp;
 
 // ============================================
@@ -66,3 +94,6 @@ void ghost_log_write(
     const char* title,
     const char* severity,
     const char* mitre);
+
+// GhostAccess: called on the GUI thread once NfcScanner reports a detection
+void ghost_access_handle_detected(GhostKitApp* app);

@@ -5,6 +5,7 @@ App(
     entry_point="ghostkit_main",
     requires=["gui", "storage"],
     stack_size=4 * 1024,
+    sources=["*.c", "modules/*.c"],
     fap_category="Tools",
     fap_version=(1, 0),
     fap_description="Physical pentest toolkit by Chauncey",

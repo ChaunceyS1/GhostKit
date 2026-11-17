@@ -1,178 +1,190 @@
-#include "ghostkit.h"
+#include "../ghostkit.h"
+#include <string.h>
 
 // ============================================
-// MENU CALLBACK
+// GhostAccess — RFID/NFC access control recon
+//
+// Uses the Momentum NFC stack's NfcScanner to passively detect which
+// contactless protocol(s) a nearby card speaks (ISO14443-3A, MIFARE
+// Classic/Ultralight, etc). Detection happens on an NFC worker thread, so the
+// result is handed back to the GUI thread via a ViewDispatcher custom event
+// (see ghostkit_custom_event_callback / ghost_access_handle_detected).
+//
+// A detected card is logged as a GhostLog finding (MITRE T1078 — Valid
+// Accounts via a clonable/weak access credential).
 // ============================================
-static void ghostkit_menu_callback(void* context, uint32_t index) {
+
+#define GHOST_ACCESS_PROTOCOL_NAME_LEN 48
+
+typedef struct {
+    bool scanning;
+    bool has_result;
+    char last_protocol[GHOST_ACCESS_PROTOCOL_NAME_LEN];
+} GhostAccessModel;
+
+// ============================================
+// NFC SCANNER CALLBACK — runs on the NFC worker thread
+// ============================================
+static void ghost_access_scanner_callback(NfcScannerEvent event, void* context) {
     GhostKitApp* app = context;
+    if(!app) return;
 
-    switch(index) {
-        case GhostKitMenuAccess:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewAccess);
-            break;
-        case GhostKitMenuSignal:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewSignal);
-            break;
-        case GhostKitMenuDrop:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewDrop);
-            break;
-        case GhostKitMenuLog:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewLog);
-            break;
-        case GhostKitMenuBLE:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewBLE);
-            break;
-        case GhostKitMenuAbout:
-            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewAbout);
-            break;
-        default:
-            break;
+    if(event.type == NfcScannerEventTypeDetected) {
+        size_t count = event.data.protocol_num;
+        if(count > GHOSTKIT_NFC_MAX_PROTOCOLS) {
+            count = GHOSTKIT_NFC_MAX_PROTOCOLS;
+        }
+        for(size_t i = 0; i < count; i++) {
+            app->detected_protocols[i] = event.data.protocols[i];
+        }
+        app->detected_protocol_count = count;
+
+        // Hand off to the GUI thread — never touch views/NFC teardown from here
+        view_dispatcher_send_custom_event(app->view_dispatcher, GhostKitCustomEventNfcDetected);
     }
 }
 
 // ============================================
-// BACK NAVIGATION
+// Called on the GUI thread once a detection event has been posted
 // ============================================
-uint32_t ghostkit_back_to_menu(void* context) {
-    UNUSED(context);
-    return GhostKitViewMainMenu;
-}
-
-static uint32_t ghostkit_exit_app(void* context) {
-    UNUSED(context);
-    return VIEW_NONE;
-}
-
-// ============================================
-// APP ALLOC
-// ============================================
-GhostKitApp* ghostkit_app_alloc() {
-    GhostKitApp* app = malloc(sizeof(GhostKitApp));
-
-    app->storage = furi_record_open(RECORD_STORAGE);
-    app->notifications = furi_record_open(RECORD_NOTIFICATION);
-    app->finding_count = 0;
-
-    storage_simply_mkdir(app->storage, "/ext/ghostkit");
-
-    app->view_dispatcher = view_dispatcher_alloc();
-
-    // Main menu
-    app->main_menu = submenu_alloc();
-    submenu_add_item(app->main_menu, "GhostAccess", GhostKitMenuAccess, ghostkit_menu_callback, app);
-    submenu_add_item(app->main_menu, "GhostSignal",  GhostKitMenuSignal,  ghostkit_menu_callback, app);
-    submenu_add_item(app->main_menu, "GhostDrop",    GhostKitMenuDrop,    ghostkit_menu_callback, app);
-    submenu_add_item(app->main_menu, "GhostLog",     GhostKitMenuLog,     ghostkit_menu_callback, app);
-    submenu_add_item(app->main_menu, "GhostBLE",     GhostKitMenuBLE,     ghostkit_menu_callback, app);
-    submenu_add_item(app->main_menu, "About",        GhostKitMenuAbout,   ghostkit_menu_callback, app);
-
-    view_set_previous_callback(
-        submenu_get_view(app->main_menu), ghostkit_exit_app);
-
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewMainMenu,
-        submenu_get_view(app->main_menu));
-
-    // About dialog
-    app->about_dialog = dialog_ex_alloc();
-    dialog_ex_set_header(app->about_dialog, "GhostKit v1.0", 64, 0, AlignCenter, AlignTop);
-    dialog_ex_set_text(
-        app->about_dialog,
-        "Physical Pentest Toolkit\nby Chauncey\n\ngithub.com/[yourusername]\n/GhostKit",
-        64, 32, AlignCenter, AlignCenter);
-    dialog_ex_set_center_button_text(app->about_dialog, "Back");
-
-    view_set_previous_callback(
-        dialog_ex_get_view(app->about_dialog), ghostkit_back_to_menu);
-
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewAbout,
-        dialog_ex_get_view(app->about_dialog));
-
-    // GhostLog
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewLog,
-        ghost_log_alloc(app));
-
-    // GhostAccess
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewAccess,
-        ghost_access_alloc(app));
-
-    // GhostSignal stub
-    View* signal_view = view_alloc();
-    view_set_previous_callback(signal_view, ghostkit_back_to_menu);
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewSignal,
-        signal_view);
-
-    // GhostDrop stub
-    View* drop_view = view_alloc();
-    view_set_previous_callback(drop_view, ghostkit_back_to_menu);
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewDrop,
-        drop_view);
-
-    // GhostBLE stub
-    View* ble_view = view_alloc();
-    view_set_previous_callback(ble_view, ghostkit_back_to_menu);
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        GhostKitViewBLE,
-        ble_view);
-
-    return app;
-}
-
-// ============================================
-// APP FREE
-// ============================================
-void ghostkit_app_free(GhostKitApp* app) {
+void ghost_access_handle_detected(GhostKitApp* app) {
     furi_assert(app);
 
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewMainMenu);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewAbout);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewLog);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewAccess);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewSignal);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewDrop);
-    view_dispatcher_remove_view(app->view_dispatcher, GhostKitViewBLE);
+    if(app->nfc_scanner) {
+        nfc_scanner_stop(app->nfc_scanner);
+        nfc_scanner_free(app->nfc_scanner);
+        app->nfc_scanner = NULL;
+    }
+    if(app->nfc) {
+        nfc_free(app->nfc);
+        app->nfc = NULL;
+    }
 
-    submenu_free(app->main_menu);
-    dialog_ex_free(app->about_dialog);
-    view_dispatcher_free(app->view_dispatcher);
+    FuriString* names = furi_string_alloc();
+    for(size_t i = 0; i < app->detected_protocol_count; i++) {
+        if(i > 0) {
+            furi_string_cat_str(names, ", ");
+        }
+        furi_string_cat_str(names, nfc_device_get_protocol_name(app->detected_protocols[i]));
+    }
+    if(app->detected_protocol_count == 0) {
+        furi_string_cat_str(names, "Unknown protocol");
+    }
 
-    furi_record_close(RECORD_STORAGE);
-    furi_record_close(RECORD_NOTIFICATION);
+    FuriString* title = furi_string_alloc();
+    furi_string_printf(title, "RFID/NFC Card Detected: %s", furi_string_get_cstr(names));
+    ghost_log_write(app, furi_string_get_cstr(title), "MEDIUM", "T1078");
 
-    free(app);
+    notification_message(app->notifications, &sequence_single_vibro);
+
+    if(app->access_view) {
+        GhostAccessModel* model = view_get_model(app->access_view);
+        model->scanning = false;
+        model->has_result = true;
+        strncpy(model->last_protocol, furi_string_get_cstr(names), GHOST_ACCESS_PROTOCOL_NAME_LEN - 1);
+        model->last_protocol[GHOST_ACCESS_PROTOCOL_NAME_LEN - 1] = '\0';
+        view_commit_model(app->access_view, true);
+    }
+
+    furi_string_free(title);
+    furi_string_free(names);
 }
 
 // ============================================
-// ENTRY POINT
+// SCREEN DRAW
 // ============================================
-int32_t ghostkit_main(void* p) {
-    UNUSED(p);
+static void ghost_access_draw(Canvas* canvas, void* model_ptr) {
+    GhostAccessModel* model = model_ptr;
+    if(!model) return;
 
-    GhostKitApp* app = ghostkit_app_alloc();
+    canvas_clear(canvas);
 
-    Gui* gui = furi_record_open(RECORD_GUI);
-    view_dispatcher_attach_to_gui(
-        app->view_dispatcher, gui, ViewDispatcherTypeFullscreen);
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str(canvas, 2, 10, "GhostAccess");
+    canvas_draw_line(canvas, 0, 13, 128, 13);
+    canvas_set_font(canvas, FontSecondary);
 
-    view_dispatcher_switch_to_view(
-        app->view_dispatcher, GhostKitViewMainMenu);
+    if(model->has_result) {
+        canvas_draw_str(canvas, 2, 25, "Card detected:");
+        canvas_draw_str(canvas, 2, 37, model->last_protocol);
+        canvas_draw_str(canvas, 2, 49, "Finding logged to GhostLog");
+        canvas_draw_str(canvas, 2, 61, "[Back] Return to menu");
+    } else if(model->scanning) {
+        canvas_draw_str(canvas, 2, 25, "Scanning...");
+        canvas_draw_str(canvas, 2, 37, "Hold card to Flipper's back");
+        canvas_draw_str(canvas, 2, 61, "[Back] Cancel scan");
+    } else {
+        canvas_draw_str(canvas, 2, 25, "Hold card to Flipper");
+        canvas_draw_str(canvas, 2, 37, "to scan NFC/RFID");
+        canvas_draw_str(canvas, 2, 49, "[OK]   Start scan");
+        canvas_draw_str(canvas, 2, 61, "[Back] Return to menu");
+    }
+}
 
-    view_dispatcher_run(app->view_dispatcher);
+// ============================================
+// BUTTON INPUT
+// ============================================
+static bool ghost_access_input(InputEvent* event, void* ctx) {
+    GhostKitApp* app = ctx;
+    if(!app) return false;
 
-    ghostkit_app_free(app);
-    furi_record_close(RECORD_GUI);
+    if(event->type == InputTypeShort) {
+        if(event->key == InputKeyOk) {
+            GhostAccessModel* model = view_get_model(app->access_view);
+            bool start_scan = !model->scanning;
+            if(start_scan) {
+                model->scanning = true;
+                model->has_result = false;
+            }
+            view_commit_model(app->access_view, true);
 
-    return 0;
+            if(start_scan) {
+                app->detected_protocol_count = 0;
+                app->nfc = nfc_alloc();
+                app->nfc_scanner = nfc_scanner_alloc(app->nfc);
+                nfc_scanner_start(app->nfc_scanner, ghost_access_scanner_callback, app);
+            }
+        }
+        if(event->key == InputKeyBack) {
+            if(app->nfc_scanner) {
+                nfc_scanner_stop(app->nfc_scanner);
+                nfc_scanner_free(app->nfc_scanner);
+                app->nfc_scanner = NULL;
+            }
+            if(app->nfc) {
+                nfc_free(app->nfc);
+                app->nfc = NULL;
+            }
+
+            GhostAccessModel* model = view_get_model(app->access_view);
+            model->scanning = false;
+            model->has_result = false;
+            view_commit_model(app->access_view, false);
+
+            view_dispatcher_switch_to_view(app->view_dispatcher, GhostKitViewMainMenu);
+        }
+    }
+    return true;
+}
+
+// ============================================
+// ALLOC
+// ============================================
+View* ghost_access_alloc(GhostKitApp* app) {
+    furi_assert(app);
+    View* view = view_alloc();
+    view_set_draw_callback(view, ghost_access_draw);
+    view_set_input_callback(view, ghost_access_input);
+    view_set_context(view, app);
+    view_set_previous_callback(view, ghostkit_back_to_menu);
+
+    view_allocate_model(view, ViewModelTypeLockFree, sizeof(GhostAccessModel));
+    GhostAccessModel* model = view_get_model(view);
+    model->scanning = false;
+    model->has_result = false;
+    model->last_protocol[0] = '\0';
+    view_commit_model(view, false);
+
+    app->access_view = view;
+    return view;
 }
