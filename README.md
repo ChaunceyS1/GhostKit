@@ -166,11 +166,11 @@ git clone https://github.com/ChaunceyS1/GhostKit \
 
 ## About
 
-Built by **Chauncey** — 18 year old sophomore studying Cybersecurity & Computer Science at Nova Southeastern University.
+Built by **Chauncey** — 20 year old junior studying Cybersecurity at Nova Southeastern University.
 
 Building toward a career in penetration testing and red teaming.
 
-- LinkedIn: (https://www.linkedin.com/in/chauncey-saintgermain-3a607b254/)
+- LinkedIn: (https://www.linkedin.com/in/chaunceysaintgermain)
 - GitHub: [github.com/ChaunceyS1](https://github.com/ChaunceyS1)
 
 ---
